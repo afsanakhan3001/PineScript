@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="hi"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nova Order Block · Live</title>
+<style>
+:root{--bg:#05070c;--card:#0b0f18;--line:#1a2233;--g:#22e39a;--r:#ff3b6b;--o:#ffa940;--t:#e8eef9;--m:#7d8aa3}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;background:rgba(5,7,12,.92);border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+header h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.3px}
+.chip{font-size:12px;padding:5px 10px;border-radius:99px;background:#121826;color:var(--m);border:1px solid var(--line)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--m)}
+.live .dot{background:var(--g);box-shadow:0 0 8px var(--g);animation:p 1.4s infinite}@keyframes p{50%{opacity:.3}}
+main{max-width:1200px;margin:auto;padding:14px}
+h2{font-size:17px;margin:18px 0 2px}.sub{color:var(--m);font-size:13px;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:760px){.grid{grid-template-columns:1fr 1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;overflow:hidden}
+.card.BUY{border-color:rgba(34,227,154,.35);box-shadow:0 0 24px rgba(34,227,154,.08)}
+.card.SELL{border-color:rgba(255,59,107,.35);box-shadow:0 0 24px rgba(255,59,107,.08)}
+.hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rank{font-weight:800;font-size:13px;border:1px solid;border-radius:8px;padding:2px 7px}
+.sym{font-size:20px;font-weight:800}.px{font-size:16px}.pct{font-weight:700}
+.badge{font-weight:800;font-size:13px;padding:4px 10px;border-radius:8px;color:#000}
+canvas{width:100%;display:block;margin-top:10px;touch-action:pan-y}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.n{background:#0f1522;border-radius:10px;padding:8px}.n b{display:block;font-size:15px}.n span{font-size:11px;color:var(--m)}
+.plan{margin:10px 0 4px;font-size:14px;line-height:1.5}.warn{font-size:12px;color:var(--m)}
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.how{display:grid;grid-template-columns:1fr;gap:10px}@media(min-width:760px){.how{grid-template-columns:1fr 1fr}}
+.how div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;line-height:1.5}
+.how b{display:block;margin-bottom:4px}
+footer{color:var(--m);font-size:12px;padding:20px 16px 40px;text-align:center;line-height:1.6}
+#tip{position:fixed;pointer-events:none;background:#141c2c;border:1px solid var(--line);padding:6px 8px;border-radius:8px;font-size:12px;display:none;z-index:9}
+.err{color:var(--r);font-size:13px}
+button{background:#121826;color:var(--t);border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:12px}
+</style></head><body>
+<header><h1>Nova Order Block</h1><span id="status" class="chip"><span class="dot"></span>Load ho raha hai…</span><span id="upd" class="chip"></span><button onclick="load(true)">↻ Refresh</button></header>
+<main>
+<h2>Aaj ke 2 Best Stock</h2><p class="sub">Sabse strong 2 setup, chahe BUY ho ya SELL. Har minute khud update.</p>
+<div id="err" class="err"></div>
+<div class="grid" id="picks"></div>
+<p class="sub" id="scaninfo" style="margin-top:8px"></p>
+<h2>Market Flow</h2><p class="sub">Har line ek F&amp;O stock: upar hara = tezi, neeche laal = mandi.</p>
+<div class="counts" id="counts"></div>
+<div class="card"><canvas id="flow" height="420"></canvas></div>
+<h2>Kaise padhe</h2>
+<div class="how">
+<div><b>Order Block (Zone)</b>Wo jagah jahan bade players ne move shuru kiya. Price wapas yahan aata hai to wahi se phir chalta hai.</div>
+<div><b>Liquidity</b>Purane high/low ke paas logon ke stop loss pade hote hain. Price unhe todkar (trap) palat sakta hai.</div>
+<div><b>SL</b>Zone ke thoda bahar. Yahan galat saabit hue to nikal jao.</div>
+<div><b>TP</b>TP1 pe aadha profit book karo, baaki TP2 tak, SL entry pe le aao.</div>
+</div>
+</main>
+<footer>Yeh analysis tool hai, investment advice nahi. F&amp;O mein loss ka risk zyada hai.<br>Data: Yahoo Finance 5-min candles (thoda delay ho sakta hai), NSE F&amp;O ke ~200 stocks.</footer>
+<div id="tip"></div>
+<script>
+const G='#22e39a',R='#ff3b6b',O='#ffa940',W='#e8eef9',M='#7d8aa3';
+let D=null;const tip=document.getElementById('tip');
+const f2=x=>Number(x).toLocaleString('en-IN',{maximumFractionDigits:2});
+function setupCanvas(c,h){const dpr=window.devicePixelRatio||1,w=c.clientWidth;c.width=w*dpr;c.height=h*dpr;c.style.height=h+'px';const x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);return [x,w,h]}
+function hline(x,y,x0,x1,col,dash,label,val,w){x.save();x.strokeStyle=col;x.lineWidth=1.4;x.setLineDash(dash);x.beginPath();x.moveTo(x0,y);x.lineTo(x1,y);x.stroke();x.restore();
+ x.fillStyle=col;x.font='bold 10px system-ui';const t=label+' '+f2(val);const tw=x.measureText(t).width;x.fillStyle='rgba(5,7,12,.85)';x.fillRect(x1+2,y-7,tw+6,14);x.fillStyle=col;x.fillText(t,x1+5,y+4)}
+function drawPick(c,p){
+ const [x,w,h]=setupCanvas(c,300);const cs=p.candles,pl=p.plan,buy=p.side==='BUY';
+ const padR=118,padL=6,top=10,bot=22;let lo=Math.min(...cs.map(k=>k[3]),pl.sl,pl.tp2,pl.entry),hi=Math.max(...cs.map(k=>k[2]),pl.sl,pl.tp2,pl.entry);
+ const liq=[];if(p.pdh>=lo-(hi-lo)*.1&&p.pdh<=hi+(hi-lo)*.1)liq.push(['PDH liq',p.pdh]);if(p.pdl>=lo-(hi-lo)*.1&&p.pdl<=hi+(hi-lo)*.1)liq.push(['PDL liq',p.pdl]);
+ liq.forEach(l=>{lo=Math.min(lo,l[1]);hi=Math.max(hi,l[1])});const pad=(hi-lo)*.04;lo-=pad;hi+=pad;
+ const Y=v=>top+(hi-v)/(hi-lo)*(h-top-bot),n=cs.length,cw=(w-padL-padR)/Math.max(n,1),X=i=>padL+cw*i+cw/2;
+ x.strokeStyle='#121a2a';x.lineWidth=1;for(let i=0;i<5;i++){const yy=top+i*(h-top-bot)/4;x.beginPath();x.moveTo(padL,yy);x.lineTo(w-padR,yy);x.stroke()}
+ const zi=Math.max(0,cs.findIndex(k=>k[0]===pl.zoneTime));const zc=buy?'rgba(34,227,154,':'rgba(255,59,107,';
+ x.fillStyle=zc+'.16)';x.strokeStyle=zc+'.7)';x.fillRect(X(zi)-cw/2,Y(pl.zoneTop),w-padR-(X(zi)-cw/2),Math.max(2,Y(pl.zoneBot)-Y(pl.zoneTop)));x.strokeRect(X(zi)-cw/2,Y(pl.zoneTop),w-padR-(X(zi)-cw/2),Math.max(2,Y(pl.zoneBot)-Y(pl.zoneTop)));
+ x.fillStyle=buy?G:R;x.font='bold 10px system-ui';x.fillText(buy?'BUY ZONE':'SELL ZONE',X(zi),Y(buy?pl.zoneBot:pl.zoneTop)+(buy?12:-4));
+ cs.forEach((k,i)=>{const up=k[4]>=k[1];x.strokeStyle=x.fillStyle=up?G:R;x.beginPath();x.moveTo(X(i),Y(k[2]));x.lineTo(X(i),Y(k[3]));x.stroke();const y1=Y(Math.max(k[1],k[4])),y2=Y(Math.min(k[1],k[4]));x.fillRect(X(i)-Math.max(1,cw*.32),y1,Math.max(2,cw*.64),Math.max(1,y2-y1))});
+ liq.forEach(l=>hline(x,Y(l[1]),padL,w-padR,O,[2,3],l[0],l[1]));
+ hline(x,Y(pl.tp2),padL,w-padR,G,[6,4],'TP2',pl.tp2);hline(x,Y(pl.tp1),padL,w-padR,G,[6,4],'TP1',pl.tp1);
+ hline(x,Y(pl.sl),padL,w-padR,R,[6,4],'SL',pl.sl);hline(x,Y(pl.entry),padL,w-padR,W,[],'ENTRY',pl.entry);
+ x.fillStyle=M;x.font='10px system-ui';[0,Math.floor(n/2),n-1].forEach(i=>{if(cs[i])x.fillText(cs[i][0],Math.min(X(i)-12,w-padR-30),h-6)});
+ c.onpointermove=e=>{const r=c.getBoundingClientRect(),i=Math.round((e.clientX-r.left-padL-cw/2)/cw);const k=cs[i];if(!k){tip.style.display='none';return}
+  tip.innerHTML=`${k[0]} · O ${f2(k[1])} H ${f2(k[2])} L ${f2(k[3])} C ${f2(k[4])}`;tip.style.display='block';tip.style.left=Math.min(e.clientX+10,innerWidth-230)+'px';tip.style.top=(e.clientY-36)+'px'};
+ c.onpointerleave=()=>tip.style.display='none'}
+function renderPicks(){const el=document.getElementById('picks');el.innerHTML='';
+ if(!D.picks.length){el.innerHTML='<div class="card">Abhi koi saaf setup nahi mila. Thodi der baad dekho.</div>';return}
+ D.picks.forEach((p,i)=>{const buy=p.side==='BUY',col=buy?G:R,pl=p.plan;const d=document.createElement('div');d.className='card '+p.side;
+ d.innerHTML=`<div class="hd"><span class="rank" style="color:${col};border-color:${col}">#${i+1}</span><span class="sym">${p.sym}</span><span class="px">₹${f2(p.price)}</span><span class="pct" style="color:${p.pct>=0?G:R}">${p.pct>=0?'+':''}${p.pct}%</span><span class="badge" style="background:${col}">${p.side}</span><span class="chip">Volume ${p.volx}x</span></div>
+ <canvas></canvas>
+ <div class="nums"><div class="n"><span>Entry</span><b>${f2(pl.entry)}</b></div><div class="n"><span>SL</span><b style="color:${R}">${f2(pl.sl)}</b></div><div class="n"><span>TP1</span><b style="color:${G}">${f2(pl.tp1)}</b></div>
+ <div class="n"><span>TP2</span><b style="color:${G}">${f2(pl.tp2)}</b></div><div class="n"><span>Risk:Reward</span><b>1:${pl.rr}</b></div><div class="n"><span>Zone</span><b>${f2(pl.zoneBot)}–${f2(pl.zoneTop)}</b></div></div>
+ <p class="plan">${buy?`Price <b>${f2(pl.entry)}</b> tak wapas aaye aur green candle bane to <b style="color:${G}">BUY</b>. SL <b>${f2(pl.sl)}</b> (zone ke neeche). Pehla target <b>${f2(pl.tp1)}</b>, doosra <b>${f2(pl.tp2)}</b>.`
+ :`Price <b>${f2(pl.entry)}</b> tak upar aaye aur red candle bane to <b style="color:${R}">SELL</b>. SL <b>${f2(pl.sl)}</b> (zone ke upar). Pehla target <b>${f2(pl.tp1)}</b>, doosra <b>${f2(pl.tp2)}</b>.`}</p>
+ <div class="warn">Zone toota (candle SL ke paar band hui) to trade cancel.</div>`;el.appendChild(d);drawPick(d.querySelector('canvas'),p)})}
+function renderFlow(){const c=document.getElementById('flow');const [x,w,h]=setupCanvas(c,Math.min(460,Math.max(300,c.clientWidth*.6)));
+ const T=D.times.length,sy=Object.keys(D.flow);let mx=1;sy.forEach(s=>D.flow[s].forEach(v=>mx=Math.max(mx,Math.abs(v))));mx*=1.08;
+ const padL=34,padR=86,top=10,bot=22,X=i=>padL+(w-padL-padR)*i/Math.max(T-1,1),Y=v=>top+(mx-v)/(2*mx)*(h-top-bot);
+ x.strokeStyle='rgba(60,100,200,.18)';x.fillStyle=M;x.font='10px system-ui';
+ for(let v=-Math.floor(mx);v<=Math.floor(mx);v++){if(Math.floor(mx)>6&&v%2)continue;x.beginPath();x.moveTo(padL,Y(v));x.lineTo(w-padR,Y(v));x.stroke();x.fillText((v>0?'+':'')+v+'%',2,Y(v)+3)}
+ const hiS=new Set([...D.flowTop.bull,...D.flowTop.bear]),pk=new Set(D.picks.map(p=>p.sym));
+ const draw=(s,lw,a,glow)=>{const arr=D.flow[s],last=arr[arr.length-1],col=last>=0?G:R;x.save();x.globalAlpha=a;x.lineWidth=lw;x.strokeStyle=col;if(glow){x.shadowColor=col;x.shadowBlur=12}
+  x.beginPath();arr.forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();x.restore();return [X(arr.length-1),Y(last),col,last]};
+ sy.filter(s=>!hiS.has(s)&&!pk.has(s)).forEach(s=>draw(s,.8,.22));
+ const labels=[];sy.filter(s=>hiS.has(s)&&!pk.has(s)).forEach(s=>labels.push([s,...draw(s,1.6,.8)]));D.picks.forEach(p=>{if(D.flow[p.sym])labels.push([p.sym,...draw(p.sym,3,1,true),1])});
+ x.strokeStyle='#fff';x.lineWidth=1.5;x.beginPath();x.moveTo(padL,Y(0));x.lineTo(w-padR,Y(0));x.stroke();
+ labels.sort((a,b)=>a[2]-b[2]);let lastY=-99;labels.forEach(l=>{let y=Math.max(l[2]+3,lastY+11);lastY=y;x.fillStyle=l[3];x.font=(l[5]?'bold 11px':'10px')+' system-ui';x.fillText(l[0]+' '+(l[4]>0?'+':'')+l[4]+'%',w-padR+4,y)});
+ x.fillStyle=M;x.font='10px system-ui';[0,Math.floor(T/2),T-1].forEach(i=>x.fillText(D.times[i],Math.min(X(i)-12,w-padR-30),h-6));
+ c.onpointermove=e=>{const r=c.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;let best=null,bd=14;
+  sy.forEach(s=>{const a=D.flow[s];const i=Math.round((px-padL)/(w-padL-padR)*(T-1));if(i<0||i>=a.length)return;const dd=Math.abs(Y(a[i])-py);if(dd<bd){bd=dd;best=[s,a[a.length-1]]}});
+  if(!best){tip.style.display='none';return}tip.textContent=best[0]+'  '+(best[1]>0?'+':'')+best[1]+'%';tip.style.display='block';tip.style.left=Math.min(e.clientX+10,innerWidth-140)+'px';tip.style.top=(e.clientY-30)+'px'};
+ c.onpointerleave=()=>tip.style.display='none';
+ document.getElementById('counts').innerHTML=`<span class="chip" style="color:${G}">Bullish ${D.bullish}</span><span class="chip" style="color:${R}">Bearish ${D.bearish}</span><span class="chip">Sideways ${D.sideways}</span>`}
+function render(){const st=document.getElementById('status');
+ if(D.live){st.className='chip live';st.innerHTML='<span class="dot"></span>LIVE · last candle '+D.lastBar}
+ else{st.className='chip';st.innerHTML='<span class="dot"></span>Market band · '+new Date(D.session).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' ka close'}
+ document.getElementById('upd').textContent='Update: '+D.updated;
+ document.getElementById('scaninfo').textContent=D.count+' F&O stocks scan kiye, 5-min candles.';
+ renderPicks();renderFlow()}
+async function load(){try{const r=await fetch('/api/data',{cache:'no-store'});const j=await r.json();if(j.error)throw j.error;D=j;document.getElementById('err').textContent='';render()}
+ catch(e){document.getElementById('err').textContent='Data nahi aaya, 1 minute mein phir try hoga.'}}
+load();setInterval(load,60000);let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>D&&render(),200)});
+</script></body></html>
